@@ -29,8 +29,8 @@ def put_resource_nice(
         force: bool,
         put_resource_record: Optional[FunctionResource]
 ):
-    print(f'applying: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
-    if resource.manager == manager and resource.config:
+    if resource.config:
+        print(f'applying: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
         resource.put(force=force)
         if put_resource_record and put_resource_record.exists and resource.exists:
             resp = put_resource_record.invoke(json_codec=True,
