@@ -4,6 +4,7 @@ import zipfile
 import uuid
 import abc
 import toolz
+from zsec_aws_tools.aws_lambda import zip_string
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
 
 from zsec_aws_tools.basic import AWSResource
@@ -34,18 +35,6 @@ class AWSResourceCollection(Iterable):
 
     def __setitem__(self, key, value):
         self._resources[key] = value
-
-
-def zip_string(text: str) -> bytes:
-    import io
-
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(zinfo_or_arcname='main.py', data=text)
-        # set permissions
-        zf.filelist[0].external_attr = 0o0666 << 16
-
-    return output.getvalue()
 
 
 class GenericResource:
