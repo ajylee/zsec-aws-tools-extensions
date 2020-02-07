@@ -1,6 +1,7 @@
 import argparse
 from typing import Dict, Optional, Iterable
 from toolz import assoc
+import uuid
 
 from zsec_aws_tools.basic import AWSResource, get_account_id
 from zsec_aws_tools.aws_lambda import FunctionResource
@@ -81,14 +82,21 @@ def handle_cli_command(
     destroy_parser.add_argument('--force', '-f', action='store_true',
                                 help='destroy resources even if not owned')
 
+    for subparser in (apply_parser, destroy_parser):
+        subparser.add_argument('--only-ztids', nargs='+', action='extend', type=uuid.UUID,
+                               help='Only apply/destroy resources with particular ztids. May affect depedencies and'
+                                    'dependents.')
+
     args = parser.parse_args()
     force = args.subparser_name in ('apply', 'destroy') and args.force
 
     resource: AWSResource
     if args.subparser_name == 'apply' or (args.subparser_name is None):
         for resource in resources:
-            put_resource_nice(manager, resource, force=force, put_resource_record=put_resource_record)
+            if not args.only_ztids or resource.ztid in args.only_ztids:
+                put_resource_nice(manager, resource, force=force, put_resource_record=put_resource_record)
 
     elif args.subparser_name == 'destroy':
         for resource in resources:
-            delete_resource_nice(manager, resource, force=force, delete_resource_record=delete_resource_record)
+            if not args.only_ztids or resource.ztid in args.only_ztids:
+                delete_resource_nice(manager, resource, force=force, delete_resource_record=delete_resource_record)
