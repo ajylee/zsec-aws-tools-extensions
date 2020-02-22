@@ -204,3 +204,11 @@ class PartialAWSResourceCollection(Iterable):
                         completed_collection, **kwargs)
 
         return completed_collection
+
+
+def get_latest_layer_version(client, LayerName: str):
+    """Returns the latest version of an AWS Lambda layer."""
+    return max(
+        client.list_layer_versions(LayerName=LayerName)['LayerVersions'],
+        key=lambda x: x['Version']
+    )['LayerVersionArn']
