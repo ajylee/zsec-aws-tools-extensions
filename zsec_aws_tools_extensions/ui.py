@@ -18,6 +18,7 @@ def get_resource_meta_description(res) -> Dict[str, str]:
             region_name=res.region_name,
             ztid=str(res.ztid),
             name=res.name,
+            index_id=res.index_id,
             type='{}.{}'.format(type(res).__module__, type(res).__name__),
         )
     else:
