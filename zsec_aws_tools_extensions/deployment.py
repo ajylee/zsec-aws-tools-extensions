@@ -1,3 +1,5 @@
+import textwrap
+
 import attr
 import boto3
 import zipfile
@@ -5,6 +7,7 @@ import uuid
 import abc
 import toolz
 from zsec_aws_tools.aws_lambda import zip_string
+import zsec_aws_tools.iam as zaws_iam
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
 
 from zsec_aws_tools.basic import AWSResource
@@ -83,6 +86,7 @@ def partial_resources(ztid, *args: PartialResourceABC, **kwargs):
     def _inner1(fn):
         name = fn.__name__
         return PartialGenericResource(ztid, name, fn, args, kwargs)
+
     return _inner1
 
 
@@ -175,7 +179,7 @@ class PartialAWSResourceCollection(Iterable):
     def extend(self, resources: Iterable[PartialResource]):
         for resource in resources:
             self.append(resource)
-            
+
     def __iter__(self) -> Generator[PartialResource, None, None]:
         yield from self._resources.values()
 
@@ -212,3 +216,47 @@ def get_latest_layer_version(client, LayerName: str):
         client.list_layer_versions(LayerName=LayerName)['LayerVersions'],
         key=lambda x: x['Version']
     )['LayerVersionArn']
+
+
+def deserialize_resource(session, region_name, type: str, ztid, index_id):
+    import importlib
+
+    module_name = '.'.join(type.split('.')[:-1])
+    leaf_name = type.split('.')[-1]
+
+    module = importlib.import_module(module_name)
+
+    _type = getattr(module, leaf_name)
+
+    return _type(session=session, region_name=region_name, ztid=ztid, index_id=index_id)
+
+
+def unmarked(deployment_id, manager, resources_by_zrn_table) -> Iterable[AWSResource]:
+    import boto3
+    from boto3.dynamodb.conditions import Key, Attr
+
+    # TODO: use GSI query
+    response = resources_by_zrn_table.scan(
+        FilterExpression=Attr('manager').eq(manager) & ~Attr('deployment_id').eq(str(deployment_id).lower()),
+        ConsistentRead=True,
+    )
+
+    assert 'LastEvaluatedKey' not in response, textwrap.wrap(textwrap.dedent('''needs pagination, violating behavior 
+        specified in documentation at 
+        https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.Pagination
+    '''))
+
+    for item in response['Items']:
+        session = boto3.Session(profile_name=item['account_number'])
+        resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
+        zrn = item['zrn']
+        yield zrn, resource
+
+
+def delete_with_zrn(resources_by_zrn_table, zrn: str, resource: AWSResource):
+    # TODO: combine with `delete_resource_nice`
+    if isinstance(resource, zaws_iam.Role):
+        print('detaching policies')
+        resource.detach_all_policies()
+    resource.delete(not_exists_ok=True)
+    resources_by_zrn_table.delete_item(Key=dict(zrn=zrn))
