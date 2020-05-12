@@ -11,7 +11,7 @@ import zsec_aws_tools.iam as zaws_iam
 def get_resource_meta_description(res) -> Dict[str, str]:
     if isinstance(res, AWSResource):
         account_number = get_account_id(res.session)
-        zrn = f'zrn:aws:{account_number}:{res.region_name}:{res.ztid}'
+        zrn = f'zrn:aws:{account_number}:{res.region_name}:{str(res.ztid).lower()}'
         return dict(
             zrn=zrn,
             account_number=account_number,
