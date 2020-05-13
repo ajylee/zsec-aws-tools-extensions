@@ -74,10 +74,23 @@ def delete_resource_nice(
 def handle_cli_command(
         manager: str,
         resources: Iterable[AWSResource],
+        support_gc: bool = False,
+        gc_account_number: str = None,
         put_resource_record: Optional[FunctionResource] = None,
         delete_resource_record: Optional[FunctionResource] = None,
         resources_by_zrn_table: Optional['Table'] = None,
 ):
+    """
+
+    :param manager: Used for "memory management" for resources.
+    :param resources:
+    :param support_gc: Whether to support garbage collection.
+    :param gc_account_number: Limit the scope of garbage collection to a particular account.
+    :param put_resource_record:
+    :param delete_resource_record:
+    :param resources_by_zrn_table:
+    :return:
+    """
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='subparser_name')
     apply_parser = subparsers.add_parser('apply')
@@ -102,7 +115,7 @@ def handle_cli_command(
     args = parser.parse_args()
     force = args.subparser_name in ('apply', 'destroy') and args.force
 
-    want_gc = not args.only_ztids
+    want_gc = support_gc and not args.only_ztids
 
     resource: AWSResource
     deployment_id = args.deployment_id or uuid.uuid4()
@@ -123,7 +136,11 @@ def handle_cli_command(
         print('collecting garbage{}'.format(' (dry)' if args.dry_gc else ''))
         from .deployment import unmarked, delete_with_zrn
 
-        for zrn, resource in unmarked(deployment_id, manager, resources_by_zrn_table):
+        for zrn, resource in unmarked(
+                deployment_id=deployment_id,
+                account_number=gc_account_number,
+                manager=manager,
+                resources_by_zrn_table=resources_by_zrn_table):
             if args.dry_gc:
                 print(f'would delete: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
             else:

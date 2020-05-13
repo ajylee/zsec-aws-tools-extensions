@@ -231,15 +231,16 @@ def deserialize_resource(session, region_name, type: str, ztid, index_id):
     return _type(session=session, region_name=region_name, ztid=ztid, index_id=index_id)
 
 
-def unmarked(deployment_id, manager, resources_by_zrn_table) -> Iterable[AWSResource]:
+def unmarked(deployment_id, account_number: Optional[str], manager, resources_by_zrn_table) -> Iterable[AWSResource]:
     import boto3
     from boto3.dynamodb.conditions import Key, Attr
 
     # TODO: use GSI query
-    response = resources_by_zrn_table.scan(
-        FilterExpression=Attr('manager').eq(manager) & ~Attr('deployment_id').eq(str(deployment_id).lower()),
-        ConsistentRead=True,
-    )
+    filter_expression = Attr('manager').eq(manager) & ~Attr('deployment_id').eq(str(deployment_id).lower())
+    if account_number:
+        filter_expression &= Attr('account_number').eq(account_number)
+
+    response = resources_by_zrn_table.scan(FilterExpression=filter_expression, ConsistentRead=True)
 
     assert 'LastEvaluatedKey' not in response, textwrap.wrap(textwrap.dedent('''needs pagination, violating behavior 
         specified in documentation at 
