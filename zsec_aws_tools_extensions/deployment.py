@@ -233,7 +233,10 @@ def deserialize_resource(session, region_name, type: str, ztid, index_id):
     return _type(session=session, region_name=region_name, ztid=ztid, index_id=index_id)
 
 
-def unmarked(deployment_id, account_number: Optional[str], manager, resources_by_zrn_table) -> Iterable[AWSResource]:
+def unmarked(
+        deployment_id, account_number: Optional[str], manager, resources_by_zrn_table,
+        high_to_low_dependency_order: bool,
+) -> Iterable[AWSResource]:
     import boto3
     from boto3.dynamodb.conditions import Key, Attr
 
@@ -249,11 +252,11 @@ def unmarked(deployment_id, account_number: Optional[str], manager, resources_by
         https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.Pagination
     '''))
 
-    for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=True):
+    for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=high_to_low_dependency_order):
         session = boto3.Session(profile_name=item['account_number'])
         resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
         zrn = item['zrn']
-        yield zrn, resource
+        yield item['dependency_order'], zrn, resource
 
 
 def delete_with_zrn(resources_by_zrn_table, zrn: str, resource: AWSResource):
@@ -263,3 +266,9 @@ def delete_with_zrn(resources_by_zrn_table, zrn: str, resource: AWSResource):
         resource.detach_all_policies()
     resource.delete(not_exists_ok=True)
     resources_by_zrn_table.delete_item(Key=dict(zrn=zrn))
+
+
+def update_dependency_order(resources_by_zrn_table, zrn, dependency_order):
+    resources_by_zrn_table.update_item(
+        Key={'zrn': zrn}, AttributeUpdates={'dependency_order': {'Value': dependency_order, 'Action': 'PUT'}},
+    )

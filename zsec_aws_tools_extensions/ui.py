@@ -1,4 +1,5 @@
 import argparse
+from functools import partial
 from typing import Dict, Optional, Iterable
 from toolz import assoc, merge
 import uuid
@@ -133,6 +134,7 @@ def handle_cli_command(
 
     resource: AWSResource
     deployment_id = args.deployment_id or uuid.uuid4()
+    nn = 0
     if args.subparser_name == 'apply' or (args.subparser_name is None):
         for nn, resource in enumerate(resources):
             if not args.only_ztids or resource.ztid in args.only_ztids:
@@ -149,19 +151,34 @@ def handle_cli_command(
             if not args.only_ztids or resource.ztid in args.only_ztids:
                 delete_resource_nice(manager, resource, force=force, delete_resource_record=delete_resource_record)
 
-    if want_gc and manager and resources_by_zrn_table:
-        print('collecting garbage{}'.format(' (dry)' if args.dry_gc else ''))
-        from .deployment import unmarked, delete_with_zrn
+    max_deployed_dependency_order = nn
 
-        for zrn, resource in unmarked(
-                deployment_id=deployment_id,
-                account_number=gc_account_number,
-                manager=manager,
-                resources_by_zrn_table=resources_by_zrn_table):
+    if support_gc:
+        assert manager and resources_by_zrn_table
+
+        from .deployment import unmarked, delete_with_zrn, update_dependency_order
+
+        _unmarked = partial(
+            unmarked,
+            deployment_id=deployment_id,
+            account_number=gc_account_number,
+            manager=manager,
+            resources_by_zrn_table=resources_by_zrn_table)
+
+        if want_gc:
+            print('collecting garbage{}'.format(' (dry)' if args.dry_gc else ''))
+
             if args.dry_gc:
-                print(f'would delete: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+                delta = None
+                for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=False):
+                    print(f'would delete: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+                    print('updating dependency_orders')
+                    if delta is not None:
+                        delta = max_deployed_dependency_order + 1 - dependency_order
+                    update_dependency_order(zrn, dependency_order + delta)
             else:
-                print(f'deleting: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+                for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=True):
+                    print(f'deleting: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
                 delete_with_zrn(resources_by_zrn_table, zrn, resource)
     else:
         print('no gc')
