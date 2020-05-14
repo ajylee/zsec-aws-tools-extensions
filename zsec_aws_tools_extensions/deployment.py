@@ -1,4 +1,5 @@
 import textwrap
+from operator import getitem, itemgetter
 
 import attr
 import boto3
@@ -6,6 +7,7 @@ import zipfile
 import uuid
 import abc
 import toolz
+from toolz import curried
 from zsec_aws_tools.aws_lambda import zip_string
 import zsec_aws_tools.iam as zaws_iam
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
@@ -247,7 +249,7 @@ def unmarked(deployment_id, account_number: Optional[str], manager, resources_by
         https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.Pagination
     '''))
 
-    for item in response['Items']:
+    for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=True):
         session = boto3.Session(profile_name=item['account_number'])
         resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
         zrn = item['zrn']

@@ -28,17 +28,31 @@ def get_resource_meta_description(res) -> Dict[str, str]:
 def put_resource_nice(
         manager,
         resource: AWSResource,
+        dependency_order: int,
         force: bool,
         put_resource_record: Optional[FunctionResource],
         deployment_id: uuid.UUID,
 ):
+    """
+
+    :param manager:
+    :param resource:
+    :param dependency_order: within a memory management scope, resources of higher dependency_order can only depend on
+        resources of lower dependency_order.
+    :param force:
+    :param put_resource_record:
+    :param deployment_id:
+    :return:
+    """
     if resource.config:
         print(f'applying: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
         resource.put(force=force)
         if put_resource_record and put_resource_record.exists and resource.exists:
             payload = merge(
                 get_resource_meta_description(resource),
-                {'deployment_id': str(deployment_id).lower(), 'manager': manager})
+                dict(deployment_id=str(deployment_id).lower(),
+                     manager=manager,
+                     dependency_order=dependency_order))
             resp = put_resource_record.invoke(json_codec=True, Payload=payload)
 
             if resp:
@@ -120,11 +134,14 @@ def handle_cli_command(
     resource: AWSResource
     deployment_id = args.deployment_id or uuid.uuid4()
     if args.subparser_name == 'apply' or (args.subparser_name is None):
-        for resource in resources:
+        for nn, resource in enumerate(resources):
             if not args.only_ztids or resource.ztid in args.only_ztids:
                 put_resource_nice(
-                    manager, resource, force=force,
-                    put_resource_record=put_resource_record, deployment_id=deployment_id,
+                    manager, resource,
+                    dependency_order=nn,
+                    force=force,
+                    put_resource_record=put_resource_record,
+                    deployment_id=deployment_id,
                 )
 
     elif args.subparser_name == 'destroy':
