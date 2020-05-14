@@ -1,4 +1,6 @@
+import logging
 import textwrap
+from functools import partial
 from operator import getitem, itemgetter
 
 import attr
@@ -13,6 +15,8 @@ import zsec_aws_tools.iam as zaws_iam
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
 
 from zsec_aws_tools.basic import AWSResource
+
+logger = logging.getLogger(__name__)
 
 
 class AWSResourceCollection(Iterable):
@@ -272,3 +276,27 @@ def update_dependency_order(resources_by_zrn_table, zrn, dependency_order):
     resources_by_zrn_table.update_item(
         Key={'zrn': zrn}, AttributeUpdates={'dependency_order': {'Value': dependency_order, 'Action': 'PUT'}},
     )
+
+
+def collect_garbage(resources_by_zrn_table, manager, gc_account_number, deployment_id, max_marked_dependency_order, dry):
+    _unmarked = partial(
+        unmarked,
+        deployment_id=deployment_id,
+        account_number=gc_account_number,
+        manager=manager,
+        resources_by_zrn_table=resources_by_zrn_table)
+
+    logger.info('collecting garbage{}'.format(' (dry)' if dry else ''))
+
+    if dry:
+        delta = None
+        for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=False):
+            print(f'would delete: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+            print('updating dependency_orders')
+            if delta is None:
+                delta = max_marked_dependency_order + 1 - dependency_order
+            update_dependency_order(resources_by_zrn_table, zrn, dependency_order + delta)
+    else:
+        for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=True):
+            print(f'deleting: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+            delete_with_zrn(resources_by_zrn_table, zrn, resource)
