@@ -1,5 +1,6 @@
 import argparse
-from typing import Dict, Optional, Iterable
+from types import MappingProxyType
+from typing import Dict, Optional, Iterable, Mapping
 from toolz import assoc, merge
 import uuid
 
@@ -95,17 +96,21 @@ def handle_cli_command(
         manager: str,
         resources: Iterable[AWSResource],
         support_gc: bool = False,
-        gc_account_number: str = None,
+        gc_scope: Mapping[str, str] = None,
         put_resource_record: Optional[FunctionResource] = None,
         delete_resource_record: Optional[FunctionResource] = None,
-        resources_by_zrn_table: Optional['Table'] = None,
+        resources_by_zrn_table=None,
 ):
     """
 
     :param manager: Used for "memory management" for resources.
-    :param resources:
+    :param resources: Resources to put.
     :param support_gc: Whether to support garbage collection.
-    :param gc_account_number: Limit the scope of garbage collection to a particular account.
+    :param gc_scope: defines a filter on attributes of resources in order to be considered in-scope for this deployment.
+        This limits the garbage collection scope.
+        E.g. `{'manager': manager, 'account_number': '123456789000'}`
+        limit the GC scope to only resources with the specified manager and in the specified account.
+        Default is `None`. If scope is `None`, this function behaves as if scope were set to `{'manager': manager}`.
     :param put_resource_record:
     :param delete_resource_record:
     :param resources_by_zrn_table:
@@ -162,7 +167,9 @@ def handle_cli_command(
         assert manager and resources_by_zrn_table
 
         if want_gc:
-            collect_garbage(resources_by_zrn_table, manager, gc_account_number, deployment_id,
+            if gc_scope is None:
+                gc_scope = {'manager': manager}
+            collect_garbage(resources_by_zrn_table, gc_scope, deployment_id,
                             max_marked_dependency_order, args.dry_gc)
         else:
             print('no gc')

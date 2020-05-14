@@ -2,6 +2,7 @@ import logging
 import textwrap
 from functools import partial
 from operator import getitem, itemgetter
+from types import MappingProxyType
 
 import attr
 import boto3
@@ -238,16 +239,18 @@ def deserialize_resource(session, region_name, type: str, ztid, index_id):
 
 
 def unmarked(
-        deployment_id, account_number: Optional[str], manager, resources_by_zrn_table,
+        resources_by_zrn_table,
+        scope: Mapping[str, str],
+        deployment_id,
         high_to_low_dependency_order: bool,
 ) -> Iterable[AWSResource]:
     import boto3
     from boto3.dynamodb.conditions import Key, Attr
 
-    # TODO: use GSI query
-    filter_expression = Attr('manager').eq(manager) & ~Attr('deployment_id').eq(str(deployment_id).lower())
-    if account_number:
-        filter_expression &= Attr('account_number').eq(account_number)
+    # TODO: use GSI query on manager
+    filter_expression = ~Attr('deployment_id').eq(str(deployment_id).lower())
+    for kk, vv in scope.items():
+        filter_expression &= Attr(kk).eq(vv)
 
     response = resources_by_zrn_table.scan(FilterExpression=filter_expression, ConsistentRead=True)
 
@@ -278,13 +281,13 @@ def update_dependency_order(resources_by_zrn_table, zrn, dependency_order):
     )
 
 
-def collect_garbage(resources_by_zrn_table, manager, gc_account_number, deployment_id, max_marked_dependency_order, dry):
+def collect_garbage(resources_by_zrn_table, scope, deployment_id, max_marked_dependency_order, dry):
     _unmarked = partial(
         unmarked,
+        resources_by_zrn_table=resources_by_zrn_table,
+        scope=scope,
         deployment_id=deployment_id,
-        account_number=gc_account_number,
-        manager=manager,
-        resources_by_zrn_table=resources_by_zrn_table)
+    )
 
     logger.info('collecting garbage{}'.format(' (dry)' if dry else ''))
 
