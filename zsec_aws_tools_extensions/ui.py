@@ -10,26 +10,9 @@ import zsec_aws_tools.iam as zaws_iam
 
 import logging
 
-from .deployment import collect_garbage, get_zrn
+from .deployment import collect_garbage, ResourceRecorder, get_resource_meta_description
 
 logger = logging.getLogger(__name__)
-
-
-def get_resource_meta_description(res) -> Dict[str, str]:
-    if isinstance(res, AWSResource):
-        account_number = get_account_id(res.session)
-        zrn = get_zrn(account_number, res.region_name, res.ztid)
-        return dict(
-            zrn=zrn,
-            account_number=account_number,
-            region_name=res.region_name,
-            ztid=str(res.ztid),
-            name=res.name,
-            index_id=res.index_id,
-            type='{}.{}'.format(type(res).__module__, type(res).__name__),
-        )
-    else:
-        raise NotImplementedError
 
 
 def put_resource_nice(
@@ -37,11 +20,12 @@ def put_resource_nice(
         resource: AWSResource,
         dependency_order: int,
         force: bool,
-        put_resource_record: Optional[FunctionResource],
+        recorder: Optional[ResourceRecorder],
         deployment_id: uuid.UUID,
 ):
     """
 
+    :param recorder:
     :param manager:
     :param resource:
     :param dependency_order: within a memory management scope, resources of higher dependency_order can only depend on
@@ -54,23 +38,15 @@ def put_resource_nice(
     if resource.config:
         print(f'applying: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
         resource.put(force=force)
-        if put_resource_record and put_resource_record.exists and resource.exists:
-            payload = merge(
-                get_resource_meta_description(resource),
-                dict(deployment_id=str(deployment_id).lower(),
-                     manager=manager,
-                     dependency_order=dependency_order))
-            resp = put_resource_record.invoke(json_codec=True, Payload=payload)
-
-            if resp:
-                print(resp)
+        if resource.exists and recorder:
+            recorder.put_resource_record(manager, deployment_id, dependency_order, resource)
 
 
 def delete_resource_nice(
         manager,
         resource: AWSResource,
         force: bool,
-        delete_resource_record: Optional[FunctionResource]
+        recorder: ResourceRecorder,
 ):
     if force:
         raise NotImplementedError('Need to implement manager check for delete.')
@@ -81,13 +57,8 @@ def delete_resource_nice(
             resource.detach_all_policies()
         print('deleting: ', resource)
         resource.delete()
-
-        if delete_resource_record and delete_resource_record.exists and not resource.exists:
-            resp = delete_resource_record.invoke(json_codec=True,
-                                                 Payload=assoc(get_resource_meta_description(resource),
-                                                               'manager', manager))
-            if resp:
-                print(resp)
+        if not resource.exists and recorder:
+            recorder.delete_resource_record(manager, resource)
     else:
         print('does not exist: ', resource)
 
@@ -97,9 +68,7 @@ def handle_cli_command(
         resources: Iterable[AWSResource],
         support_gc: bool = False,
         gc_scope: Mapping[str, str] = None,
-        put_resource_record: Optional[FunctionResource] = None,
-        delete_resource_record: Optional[FunctionResource] = None,
-        resources_by_zrn_table=None,
+        recorder: ResourceRecorder = None,
 ):
     """
 
@@ -111,9 +80,7 @@ def handle_cli_command(
         E.g. `{'manager': manager, 'account_number': '123456789000'}`
         limit the GC scope to only resources with the specified manager and in the specified account.
         Default is `None`. If scope is `None`, this function behaves as if scope were set to `{'manager': manager}`.
-    :param put_resource_record:
-    :param delete_resource_record:
-    :param resources_by_zrn_table:
+    :param recorder: used for recording resource deployment state
     :return:
     """
     parser = argparse.ArgumentParser()
@@ -152,25 +119,28 @@ def handle_cli_command(
                     manager, resource,
                     dependency_order=nn,
                     force=force,
-                    put_resource_record=put_resource_record,
+                    recorder=recorder,
                     deployment_id=deployment_id,
                 )
 
     elif args.subparser_name == 'destroy':
         for resource in resources:
             if not args.only_ztids or resource.ztid in args.only_ztids:
-                delete_resource_nice(manager, resource, force=force, delete_resource_record=delete_resource_record)
+                delete_resource_nice(manager, resource, force=force, recorder=recorder)
 
     max_marked_dependency_order = nn
 
     if support_gc:
-        assert manager and resources_by_zrn_table
+        assert manager and recorder
 
         if want_gc:
             if gc_scope is None:
                 gc_scope = {'manager': manager}
-            collect_garbage(resources_by_zrn_table, gc_scope, deployment_id,
-                            max_marked_dependency_order, args.dry_gc)
+
+            if 'manager' not in gc_scope:
+                raise ValueError("GC scope without manager is too dangerous")
+
+            collect_garbage(recorder, gc_scope, deployment_id, max_marked_dependency_order, args.dry_gc)
         else:
             print('no gc')
     else:

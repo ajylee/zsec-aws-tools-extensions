@@ -11,17 +11,34 @@ import uuid
 import abc
 import toolz
 from toolz import curried
-from zsec_aws_tools.aws_lambda import zip_string
+from zsec_aws_tools.aws_lambda import zip_string, FunctionResource
 import zsec_aws_tools.iam as zaws_iam
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
 
-from zsec_aws_tools.basic import AWSResource
+from zsec_aws_tools.basic import AWSResource, get_account_id
 
 logger = logging.getLogger(__name__)
 
 
 def get_zrn(account_number: str, region_name: str, ztid: uuid.UUID):
     return f'zrn:aws:{account_number}:{region_name}:{str(ztid).lower()}'
+
+
+def get_resource_meta_description(res) -> Dict[str, str]:
+    if isinstance(res, AWSResource):
+        account_number = get_account_id(res.session)
+        zrn = get_zrn(account_number, res.region_name, res.ztid)
+        return dict(
+            zrn=zrn,
+            account_number=account_number,
+            region_name=res.region_name,
+            ztid=str(res.ztid),
+            name=res.name,
+            index_id=res.index_id,
+            type='{}.{}'.format(type(res).__module__, type(res).__name__),
+        )
+    else:
+        raise NotImplementedError
 
 
 class AWSResourceCollection(Iterable):
@@ -242,56 +259,8 @@ def deserialize_resource(session, region_name, type: str, ztid, index_id):
     return _type(session=session, region_name=region_name, ztid=ztid, index_id=index_id)
 
 
-def unmarked(
-        resources_by_zrn_table,
-        scope: Mapping[str, str],
-        deployment_id,
-        high_to_low_dependency_order: bool,
-) -> Iterable[AWSResource]:
-    import boto3
-    from boto3.dynamodb.conditions import Key, Attr
-
-    # TODO: use GSI query on manager
-    filter_expression = ~Attr('deployment_id').eq(str(deployment_id).lower())
-    for kk, vv in scope.items():
-        filter_expression &= Attr(kk).eq(vv)
-
-    response = resources_by_zrn_table.scan(FilterExpression=filter_expression, ConsistentRead=True)
-
-    assert 'LastEvaluatedKey' not in response, textwrap.wrap(textwrap.dedent('''needs pagination, violating behavior 
-        specified in documentation at 
-        https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.Pagination
-    '''))
-
-    for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=high_to_low_dependency_order):
-        session = boto3.Session(profile_name=item['account_number'])
-        resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
-        zrn = item['zrn']
-        yield item['dependency_order'], zrn, resource
-
-
-def delete_with_zrn(resources_by_zrn_table, zrn: str, resource: AWSResource):
-    # TODO: combine with `delete_resource_nice`
-    if isinstance(resource, zaws_iam.Role):
-        print('detaching policies')
-        resource.detach_all_policies()
-    resource.delete(not_exists_ok=True)
-    resources_by_zrn_table.delete_item(Key=dict(zrn=zrn))
-
-
-def update_dependency_order(resources_by_zrn_table, zrn, dependency_order):
-    resources_by_zrn_table.update_item(
-        Key={'zrn': zrn}, AttributeUpdates={'dependency_order': {'Value': dependency_order, 'Action': 'PUT'}},
-    )
-
-
-def collect_garbage(resources_by_zrn_table, scope, deployment_id, max_marked_dependency_order, dry):
-    _unmarked = partial(
-        unmarked,
-        resources_by_zrn_table=resources_by_zrn_table,
-        scope=scope,
-        deployment_id=deployment_id,
-    )
+def collect_garbage(recorder, scope, deployment_id, max_marked_dependency_order, dry):
+    _unmarked = partial(recorder.unmarked, scope=scope, deployment_id=deployment_id)
 
     logger.info('collecting garbage{}'.format(' (dry)' if dry else ''))
 
@@ -302,8 +271,134 @@ def collect_garbage(resources_by_zrn_table, scope, deployment_id, max_marked_dep
             print('updating dependency_orders')
             if delta is None:
                 delta = max_marked_dependency_order + 1 - dependency_order
-            update_dependency_order(resources_by_zrn_table, zrn, dependency_order + delta)
+            recorder.update_dependency_order(zrn, dependency_order + delta)
     else:
         for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=True):
             print(f'deleting: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
-            delete_with_zrn(resources_by_zrn_table, zrn, resource)
+            delete_by_zrn(recorder, zrn, resource)
+
+
+def delete_by_zrn(recorder: 'ResourceRecorder', zrn: str, resource: AWSResource):
+    # TODO: combine with `delete_resource_nice`
+    if isinstance(resource, zaws_iam.Role):
+        print('detaching policies')
+        resource.detach_all_policies()
+    resource.delete(not_exists_ok=True)
+    recorder.delete_record_by_zrn(zrn)
+
+
+class ResourceRecorder(abc.ABC):
+    manager: str
+
+    @abc.abstractmethod
+    def put_resource_record(self, manager, deployment_id: uuid.UUID, dependency_order: int, resource: AWSResource):
+        ...
+
+    @abc.abstractmethod
+    def delete_resource_record(self, manager, resource: AWSResource):
+        ...
+
+    @abc.abstractmethod
+    def update_dependency_order(self, dependency_order, resource: AWSResource):
+        ...
+
+    @abc.abstractmethod
+    def unmarked(self, scope: Mapping[str, str], deployment_id, high_to_low_dependency_order: bool
+                 ) -> Iterable[AWSResource]:
+        ...
+
+    @abc.abstractmethod
+    def delete_record_by_zrn(self, zrn):
+        ...
+
+
+class DynamoResourceRecorder(ResourceRecorder):
+    def __init__(self, resources_by_zrn_table):
+        self.resources_by_zrn_table = resources_by_zrn_table
+        super().__init__()
+
+    def put_resource_record(self, manager, deployment_id: uuid.UUID, dependency_order: int, resource: AWSResource):
+        item = toolz.merge(
+            get_resource_meta_description(resource),
+            dict(deployment_id=str(deployment_id).lower(),
+                 manager=manager,
+                 dependency_order=dependency_order))
+        self.resources_by_zrn_table.put_item(**item)
+
+    def update_dependency_order(self, dependency_order, resource: AWSResource):
+        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid)
+        self.resources_by_zrn_table.update_item(
+            Key={'zrn': zrn}, AttributeUpdates={'dependency_order': {'Value': dependency_order, 'Action': 'PUT'}},
+        )
+
+    def delete_resource_record(self, manager, resource: AWSResource):
+        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid)
+        self.resources_by_zrn_table.delete_item(Key={'zrn': zrn})
+
+    def unmarked(self, scope: Mapping[str, str], deployment_id,
+                 high_to_low_dependency_order: bool) -> Iterable[AWSResource]:
+        from boto3.dynamodb.conditions import Key, Attr
+
+        # TODO: use GSI query on manager
+        filter_expression = ~Attr('deployment_id').eq(str(deployment_id).lower())
+        for kk, vv in scope.items():
+            filter_expression &= Attr(kk).eq(vv)
+
+        response = self.resources_by_zrn_table.scan(FilterExpression=filter_expression, ConsistentRead=True)
+
+        assert 'LastEvaluatedKey' not in response, textwrap.wrap(textwrap.dedent('''needs pagination, violating behavior 
+            specified in documentation at 
+            https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Scan.html#Scan.Pagination
+        '''))
+
+        for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=high_to_low_dependency_order):
+            session = boto3.Session(profile_name=item['account_number'])
+            resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
+            zrn = item['zrn']
+            yield item['dependency_order'], zrn, resource
+
+    def delete_record_by_zrn(self, zrn):
+        self.resources_by_zrn_table.delete_item(Key=dict(zrn=zrn))
+
+
+class LambdaResourceRecorder(ResourceRecorder, abc.ABC):
+    def __init__(self, put_resource_record_lambda: FunctionResource, delete_resource_record_lambda: FunctionResource):
+        self.put_resource_record_lambda = put_resource_record_lambda
+        self.delete_resource_record_lambda = delete_resource_record_lambda
+        ResourceRecorder.__init__(self)
+
+    def put_resource_record(self, manager, deployment_id: uuid.UUID, dependency_order: int,
+                            resource: AWSResource):
+        if self.put_resource_record_lambda and self.put_resource_record_lambda.exists and resource.exists:
+            payload = toolz.merge(
+                get_resource_meta_description(resource),
+                dict(deployment_id=str(deployment_id).lower(),
+                     manager=manager,
+                     dependency_order=dependency_order))
+            resp = self.put_resource_record_lambda.invoke(json_codec=True, Payload=payload)
+
+            if resp:
+                print(resp)
+        else:
+            print('put resource record failed')
+
+    def delete_resource_record(self, manager, resource: AWSResource):
+        if self.delete_resource_record and self.delete_resource_record_lambda.exists:
+            resp = self.delete_resource_record_lambda.invoke(
+                json_codec=True,
+                Payload=toolz.assoc(get_resource_meta_description(resource),
+                                    'manager', manager))
+            if resp:
+                print(resp)
+        else:
+            print('delete resource record failed')
+
+
+class MixedLambdaDynamoResourceRecorder(LambdaResourceRecorder, DynamoResourceRecorder, ResourceRecorder):
+    def __init__(self, put_resource_record_lambda: FunctionResource, resources_by_zrn_table):
+        LambdaResourceRecorder.__init__(self, put_resource_record_lambda, None)
+        DynamoResourceRecorder.__init__(self, resources_by_zrn_table)
+        ResourceRecorder.__init__(self)
+
+    def delete_resource_record(self, manager, resource):
+        return DynamoResourceRecorder.delete_resource_record(self, manager, resource)
