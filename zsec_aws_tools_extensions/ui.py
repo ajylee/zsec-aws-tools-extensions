@@ -10,7 +10,7 @@ import zsec_aws_tools.iam as zaws_iam
 
 import logging
 
-from .deployment import collect_garbage
+from .deployment import collect_garbage, get_zrn
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def get_resource_meta_description(res) -> Dict[str, str]:
     if isinstance(res, AWSResource):
         account_number = get_account_id(res.session)
-        zrn = f'zrn:aws:{account_number}:{res.region_name}:{str(res.ztid).lower()}'
+        zrn = get_zrn(account_number, res.region_name, res.ztid)
         return dict(
             zrn=zrn,
             account_number=account_number,

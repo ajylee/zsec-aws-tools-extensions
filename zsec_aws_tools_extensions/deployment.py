@@ -20,6 +20,10 @@ from zsec_aws_tools.basic import AWSResource
 logger = logging.getLogger(__name__)
 
 
+def get_zrn(account_number: str, region_name: str, ztid: uuid.UUID):
+    return f'zrn:aws:{account_number}:{region_name}:{str(ztid).lower()}'
+
+
 class AWSResourceCollection(Iterable):
     def __init__(self):
         self._resources = {}
