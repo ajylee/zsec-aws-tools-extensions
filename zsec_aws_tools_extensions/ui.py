@@ -104,7 +104,16 @@ def handle_cli_command(
                                help='do not garbage collect, only report. If --only-ztids` is specified, this flag '
                                     'is redundant because GC will be skipped.')
 
+        subparser.add_argument('--verbose', '-v', action='store_true',
+                               help='increase log level')
+
     args = parser.parse_args()
+    
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
     force = args.subparser_name in ('apply', 'destroy') and args.force
 
     want_gc = support_gc and not args.only_ztids
