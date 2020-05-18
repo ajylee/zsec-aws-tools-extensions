@@ -284,6 +284,9 @@ def delete_by_zrn(recorder: 'ResourceRecorder', zrn: str, resource: AWSResource)
     if isinstance(resource, zaws_iam.Role):
         print('detaching policies')
         resource.detach_all_policies()
+        print('deleting inline policies')
+        resource.delete_inline_policies()
+
     resource.delete(not_exists_ok=True)
     recorder.delete_record_by_zrn(zrn)
 
