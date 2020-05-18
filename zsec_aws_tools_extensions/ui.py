@@ -108,7 +108,7 @@ def handle_cli_command(
                                help='increase log level')
 
     args = parser.parse_args()
-    
+
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
     else:

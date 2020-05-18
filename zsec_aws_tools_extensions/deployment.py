@@ -16,6 +16,7 @@ import zsec_aws_tools.iam as zaws_iam
 from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
 
 from zsec_aws_tools.basic import AWSResource, get_account_id
+from .session_management import SessionSource
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +314,9 @@ class ResourceRecorder(abc.ABC):
 
 
 class DynamoResourceRecorder(ResourceRecorder):
-    def __init__(self, resources_by_zrn_table):
+    def __init__(self, resources_by_zrn_table, session_source: SessionSource):
         self.resources_by_zrn_table = resources_by_zrn_table
+        self.session_source = session_source
         super().__init__()
 
     def put_resource_record(self, manager, deployment_id: uuid.UUID, dependency_order: int, resource: AWSResource):
@@ -352,7 +354,7 @@ class DynamoResourceRecorder(ResourceRecorder):
         '''))
 
         for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=high_to_low_dependency_order):
-            session = boto3.Session(profile_name=item['account_number'])
+            session = self.session_source.get_session(item['account_number'])
             resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
             zrn = item['zrn']
             yield item['dependency_order'], zrn, resource
@@ -395,9 +397,14 @@ class LambdaResourceRecorder(ResourceRecorder, abc.ABC):
 
 
 class MixedLambdaDynamoResourceRecorder(LambdaResourceRecorder, DynamoResourceRecorder, ResourceRecorder):
-    def __init__(self, put_resource_record_lambda: FunctionResource, resources_by_zrn_table):
+    def __init__(
+            self,
+            put_resource_record_lambda: FunctionResource,
+            resources_by_zrn_table,
+            session_source: SessionSource
+    ):
         LambdaResourceRecorder.__init__(self, put_resource_record_lambda, None)
-        DynamoResourceRecorder.__init__(self, resources_by_zrn_table)
+        DynamoResourceRecorder.__init__(self, resources_by_zrn_table, session_source=session_source)
         ResourceRecorder.__init__(self)
 
     def delete_resource_record(self, manager, resource):
