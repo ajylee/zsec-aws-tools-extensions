@@ -8,7 +8,7 @@ setuptools.setup(
         'boto3',
         'toolz',
         'attrs',
-        'zsec-aws-tools >= 0.1.17',
+        'zsec-aws-tools >= 0.1.20',
     ],
     tests_require=[
         'toolz',
