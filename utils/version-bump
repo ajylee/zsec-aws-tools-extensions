@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+
+import argparse
+import subprocess as sbp
+from pathlib import Path
+import re
+
+
+def git_top_level():
+    return Path(sbp.Popen('git rev-parse --show-toplevel'.split(), stdout=sbp.PIPE).communicate()[0].strip().decode())
+
+
+def git_tag(version, force):
+    force_flags = ['-f'] if force else []
+    sbp.call(['git', 'tag', *force_flags, args.version])
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('version')
+parser.add_argument('--force', '-f', action='store_true')
+args = parser.parse_args()
+
+git_tag(args.version, args.force)
+setup_file_path = git_top_level().joinpath('setup.py')
+
+out_lines = []
+for line in setup_file_path.read_text().split('\n'):
+    out_lines.append(re.sub(r'^( *)version=.*,$', rf"\1version='{args.version}',", line))
+
+setup_file_path.write_text('\n'.join(out_lines))
