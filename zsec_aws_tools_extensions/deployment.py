@@ -194,7 +194,16 @@ class PartialResource(PartialResourceABC):
         return PartialResourceAttribute(self, name)
 
 class PartialResourceCollection(Iterable):
+    """
+    Partially Defined Resource Collection
 
+    A collection of PartialResources. When the `complete` method of the collection is called with keyword arguments,
+    the `complete` method of each element of the collection is called with the same keyword arguments passed through.
+
+    Additionally, you can pass keyword arguments when calling the constructor. These keyword arguments will
+    also be passed to the `complete` method of each element when the `PartialResourceCollection.complete` is called.
+
+    """
     _resources: Dict[uuid.UUID, PartialResource]
 
     def __init__(self, **kwargs):
