@@ -197,7 +197,8 @@ class PartialResourceCollection(Iterable):
 
     _resources: Dict[uuid.UUID, PartialResource]
 
-    def __init__(self):
+    def __init__(self, **kwargs):
+        self.collection_common_kwargs = kwargs
         self._resources = {}
 
     def new_partial_resource(self, type_: type, config: Mapping, name: str = None,
@@ -230,7 +231,7 @@ class PartialResourceCollection(Iterable):
     def complete(self, session: boto3.Session, region_name: str = None, manager: str = None) -> AWSResourceCollection:
         completed_collection = AWSResourceCollection()
 
-        kwargs = dict(session=session)
+        kwargs = dict(session=session, **self.collection_common_kwargs)
         if region_name:
             kwargs['region_name'] = region_name
         if manager:
