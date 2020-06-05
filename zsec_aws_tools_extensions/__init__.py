@@ -1,1 +1,7 @@
-from .deployment import zip_string, PartialAWSResourceCollection, PartialResource, partial_resources
+from .deployment import (
+    zip_string,
+    PartialResource,
+    partial_resources,
+    PartialResourceCollection,
+    PartialAWSResourceCollection,
+)

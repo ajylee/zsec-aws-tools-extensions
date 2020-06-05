@@ -193,8 +193,8 @@ class PartialResource(PartialResourceABC):
     def partial_attribute(self, name):
         return PartialResourceAttribute(self, name)
 
+class PartialResourceCollection(Iterable):
 
-class PartialAWSResourceCollection(Iterable):
     _resources: Dict[uuid.UUID, PartialResource]
 
     def __init__(self):
@@ -243,6 +243,9 @@ class PartialAWSResourceCollection(Iterable):
                         completed_collection, **kwargs)
 
         return completed_collection
+
+
+PartialAWSResourceCollection = PartialResourceCollection
 
 
 def get_latest_layer_version(client, LayerName: str):
