@@ -193,6 +193,16 @@ class PartialResource(PartialResourceABC):
     def partial_attribute(self, name):
         return PartialResourceAttribute(self, name)
 
+    def partial_fill(self, override=True, **kwargs) -> __qualname__:
+        core_kwargs: Dict[str, Any]
+        core_kwargs = dict(name=self.name, ztid=self.ztid, config=self.config)
+        if override:
+            combined_kwargs = toolz.merge(core_kwargs, self.kwargs, kwargs)
+        else:
+            combined_kwargs = toolz.merge(kwargs, core_kwargs, self.kwargs)
+        return __class__(**combined_kwargs)
+
+
 class PartialResourceCollection(Iterable):
     """
     Partially Defined Resource Collection
