@@ -137,7 +137,13 @@ class PartialResourceAttribute:
 
 class PartialResource(PartialResourceABC):
     """
-    if config is None, then
+    Partially Defined Resource
+
+    Note that a PartialResource could be thought of as a template. However, they are not called ResourceTemplate
+    because template may connote that the code is meant for broad reuse, whereas PartialResources can be quite specific.
+
+    Note: if config is None, then it will be assumed to already exist, so there will be no completion of dependencies.
+
     """
     ztid: uuid.UUID
     type_: type
