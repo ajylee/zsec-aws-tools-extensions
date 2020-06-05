@@ -151,16 +151,16 @@ class PartialResource(PartialResourceABC):
         self.config = config
         self.index_id = index_id
 
-    def complete_dependents(self, collection: AWSResourceCollection, element, **kwargs) -> Any:
+    def complete_dependencies(self, collection: AWSResourceCollection, element, **kwargs) -> Any:
         if isinstance(element, Mapping):
             completed = {}
             for kk, vv in element.items():
-                completed[kk] = self.complete_dependents(collection, vv, **kwargs)
+                completed[kk] = self.complete_dependencies(collection, vv, **kwargs)
             return completed
         elif isinstance(element, List):
             completed = []
             for sub_elt in element:
-                completed.append(self.complete_dependents(collection, sub_elt, **kwargs))
+                completed.append(self.complete_dependencies(collection, sub_elt, **kwargs))
             return completed
         elif isinstance(element, PartialResource):
             if element.ztid not in collection:
@@ -175,7 +175,7 @@ class PartialResource(PartialResourceABC):
         core_kwargs: Dict[str, Any]
         core_kwargs = dict(name=self.name, ztid=self.ztid)
         if self.config is not None:
-            core_kwargs['config'] = self.complete_dependents(collection, element=self.config, **kwargs)
+            core_kwargs['config'] = self.complete_dependencies(collection, element=self.config, **kwargs)
 
         combined_kwargs = toolz.merge(kwargs, core_kwargs, self.kwargs)
 
