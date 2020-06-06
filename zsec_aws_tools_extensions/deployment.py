@@ -21,19 +21,21 @@ from .session_management import SessionSource
 logger = logging.getLogger(__name__)
 
 
-def get_zrn(account_number: str, region_name: str, ztid: uuid.UUID):
-    return f'zrn:aws:{account_number}:{region_name}:{str(ztid).lower()}'
+def get_zrn(account_number: str, region_name: str, ztid: uuid.UUID, serial_id: Optional[str]):
+    serial_part = f'/{serial_id}' if serial_id else ''
+    return f'zrn:aws:{account_number}:{region_name}:{str(ztid).lower()}{serial_part}'
 
 
 def get_resource_meta_description(res) -> Dict[str, str]:
     if isinstance(res, AWSResource):
         account_number = get_account_id(res.session)
-        zrn = get_zrn(account_number, res.region_name, res.ztid)
+        zrn = get_zrn(account_number, res.region_name, res.ztid, res.serial_id)
         return dict(
             zrn=zrn,
             account_number=account_number,
             region_name=res.region_name,
             ztid=str(res.ztid),
+            serial_id=res.serial_id,
             name=res.name,
             index_id=res.index_id,
             type='{}.{}'.format(type(res).__module__, type(res).__name__),
@@ -276,7 +278,7 @@ def get_latest_layer_version(client, LayerName: str):
     )['LayerVersionArn']
 
 
-def deserialize_resource(session, region_name, type: str, ztid, index_id):
+def deserialize_resource(session, region_name, type: str, index_id, ztid, serial_id):
     import importlib
 
     module_name = '.'.join(type.split('.')[:-1])
@@ -286,7 +288,7 @@ def deserialize_resource(session, region_name, type: str, ztid, index_id):
 
     _type = getattr(module, leaf_name)
 
-    return _type(session=session, region_name=region_name, ztid=ztid, index_id=index_id)
+    return _type(session=session, region_name=region_name, ztid=ztid, serial_id=serial_id, index_id=index_id)
 
 
 def collect_garbage(recorder, scope, deployment_id, max_marked_dependency_order, dry):
@@ -360,13 +362,13 @@ class DynamoResourceRecorder(ResourceRecorder):
         self.resources_by_zrn_table.put_item(**item)
 
     def update_dependency_order(self, dependency_order, resource: AWSResource):
-        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid)
+        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid, resource.serial_id)
         self.resources_by_zrn_table.update_item(
             Key={'zrn': zrn}, AttributeUpdates={'dependency_order': {'Value': dependency_order, 'Action': 'PUT'}},
         )
 
     def delete_resource_record(self, manager, resource: AWSResource):
-        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid)
+        zrn = get_zrn(get_account_id(resource.session), resource.region_name, resource.ztid, resource.serial_id)
         self.resources_by_zrn_table.delete_item(Key={'zrn': zrn})
 
     def unmarked(self, scope: Mapping[str, str], deployment_id,
@@ -387,7 +389,10 @@ class DynamoResourceRecorder(ResourceRecorder):
 
         for item in sorted(response['Items'], key=itemgetter('dependency_order'), reverse=high_to_low_dependency_order):
             session = self.session_source.get_session(item['account_number'])
-            resource = deserialize_resource(session, item['region_name'], item['type'], item['ztid'], item['index_id'])
+            resource = deserialize_resource(
+                session, region_name=['region_name'], type=['type'], index_id=['index_id'],
+                ztid=item['ztid'], serial_id=item['serial_id']
+            )
             zrn = item['zrn']
             yield item['dependency_order'], zrn, resource
 
