@@ -92,6 +92,8 @@ def handle_cli_command(
     destroy_parser.add_argument('--force', '-f', action='store_true',
                                 help='destroy resources even if not owned')
 
+    parser.add_argument('--verbose', '-v', action='store_true', help='increase log level')
+
     for subparser in (apply_parser, destroy_parser):
         subparser.add_argument('--only-ztids', nargs='+', action='extend', type=uuid.UUID,
                                help='Only apply/destroy resources with particular ztids. May affect depedencies and'
@@ -104,9 +106,6 @@ def handle_cli_command(
                                help='do not garbage collect, only report. If --only-ztids` is specified, this flag '
                                     'is redundant because GC will be skipped.')
 
-        subparser.add_argument('--verbose', '-v', action='store_true',
-                               help='increase log level')
-
     args = parser.parse_args()
 
     if args.verbose:
@@ -116,7 +115,7 @@ def handle_cli_command(
 
     force = args.subparser_name in ('apply', 'destroy') and args.force
 
-    want_gc = support_gc and not args.only_ztids
+    want_gc = args.subparser_name in ('apply', 'destroy') and support_gc and not args.only_ztids
 
     resource: AWSResource
     deployment_id = args.deployment_id or uuid.uuid4()
