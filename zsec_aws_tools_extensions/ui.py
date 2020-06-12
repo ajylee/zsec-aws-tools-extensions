@@ -1,7 +1,7 @@
 import argparse
 from types import MappingProxyType
-from typing import Dict, Optional, Iterable, Mapping
-from toolz import assoc, merge
+from typing import Dict, Optional, Iterable, Mapping, Tuple
+from toolz import assoc, merge, memoize
 import uuid
 
 from zsec_aws_tools.basic import AWSResource, get_account_id
@@ -10,7 +10,7 @@ import zsec_aws_tools.iam as zaws_iam
 
 import logging
 
-from .deployment import collect_garbage, ResourceRecorder, get_resource_meta_description
+from .deployment import collect_garbage, ResourceRecorder, get_resource_meta_description, get_zrn
 
 logger = logging.getLogger(__name__)
 
@@ -121,21 +121,42 @@ def handle_cli_command(
     resource: AWSResource
     deployment_id = args.deployment_id or uuid.uuid4()
     nn = 0
+
+    _get_account_id = memoize(get_account_id)
+
     if args.subparser_name == 'apply' or (args.subparser_name is None):
+        applied = set()
         for nn, resource in enumerate(resources):
             if not args.only_ztids or resource.ztid in args.only_ztids:
-                put_resource_nice(
-                    manager, resource,
-                    dependency_order=nn,
-                    force=force,
-                    recorder=recorder,
-                    deployment_id=deployment_id,
+                zrn = get_zrn(
+                    account_number=_get_account_id(resource.session),
+                    region_name=resource.region_name,
+                    ztid=resource.ztid,
+                    clouducer_path=resource.clouducer_path,
                 )
+                if zrn not in applied:
+                    put_resource_nice(
+                        manager, resource,
+                        dependency_order=nn,
+                        force=force,
+                        recorder=recorder,
+                        deployment_id=deployment_id,
+                    )
+                    applied.add(zrn)
 
     elif args.subparser_name == 'destroy':
+        destroyed = set()
         for resource in resources:
             if not args.only_ztids or resource.ztid in args.only_ztids:
-                delete_resource_nice(manager, resource, force=force, recorder=recorder)
+                zrn = get_zrn(
+                    account_number=_get_account_id(resource.session),
+                    region_name=resource.region_name,
+                    ztid=resource.ztid,
+                    clouducer_path=resource.clouducer_path,
+                )
+                if zrn not in destroyed:
+                    delete_resource_nice(manager, resource, force=force, recorder=recorder)
+                    destroyed.add(zrn)
 
     max_marked_dependency_order = nn
 
