@@ -1,6 +1,6 @@
 import argparse
 from types import MappingProxyType
-from typing import Dict, Optional, Iterable, Mapping, Tuple
+from typing import Dict, Optional, Iterable, Mapping, Tuple, Callable
 from toolz import assoc, merge, memoize
 import uuid
 
@@ -69,6 +69,7 @@ def handle_cli_command(
         support_gc: bool = False,
         gc_scope: Mapping[str, str] = None,
         recorder: ResourceRecorder = None,
+        post_apply_callback: Callable[[AWSResource], None] = lambda r: None,
 ):
     """
 
@@ -142,6 +143,7 @@ def handle_cli_command(
                         deployment_id=deployment_id,
                     )
                     applied.add(zrn)
+                    post_apply_callback(resource)
 
     elif args.subparser_name == 'destroy':
         destroyed = set()
