@@ -13,7 +13,7 @@ import toolz
 from toolz import curried
 from zsec_aws_tools.aws_lambda import zip_string, FunctionResource
 import zsec_aws_tools.iam as zaws_iam
-from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional
+from typing import Iterable, Callable, Mapping, Generator, Any, List, Tuple, Union, Dict, Optional, Iterator
 
 from zsec_aws_tools.basic import AWSResource, get_account_id
 from .session_management import SessionSource
@@ -59,7 +59,7 @@ class AWSResourceCollection(Iterable):
         for resource in resources:
             self.append(resource)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[AWSResource]:
         yield from self._resources.values()
 
     def __getitem__(self, key):
@@ -303,14 +303,14 @@ def collect_garbage(recorder, scope, deployment_id, max_marked_dependency_order,
     if dry:
         delta = None
         for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=False):
-            print(f'would delete: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+            print(f'would delete: {resource.name}(ztid={zrn}) : {type(resource).__name__}')
             print('updating dependency_orders')
             if delta is None:
                 delta = max_marked_dependency_order + 1 - dependency_order
             recorder.update_dependency_order(zrn, dependency_order + delta)
     else:
         for dependency_order, zrn, resource in _unmarked(high_to_low_dependency_order=True):
-            print(f'deleting: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
+            print(f'deleting: {resource.name}(zrn={zrn}) : {type(resource).__name__}')
             delete_by_zrn(recorder, zrn, resource)
 
 
