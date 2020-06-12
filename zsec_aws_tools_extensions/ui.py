@@ -37,7 +37,7 @@ def put_resource_nice(
     """
     if resource.config:
         print(f'applying: {resource.name}(ztid={resource.ztid}) : {type(resource).__name__}')
-        resource.put(force=force)
+        resource.put(force=force, wait=True)
         if resource.exists and recorder:
             recorder.put_resource_record(manager, deployment_id, dependency_order, resource)
 
