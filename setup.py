@@ -14,5 +14,5 @@ setuptools.setup(
         'toolz',
         'pytest',
     ],
-    version='v0.1.8-alpha.6',
+    version='v0.1.8-alpha.7',
 )
