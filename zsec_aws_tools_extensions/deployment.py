@@ -412,7 +412,15 @@ class LambdaResourceRecorder(ResourceRecorder, abc.ABC):
 
     def put_resource_record(self, manager, deployment_id: uuid.UUID, dependency_order: int,
                             resource: AWSResource):
-        if self.put_resource_record_lambda and self.put_resource_record_lambda.exists and resource.exists:
+        if not self.put_resource_record_lambda:
+            print('put resource record failed because no put_resource_record_lambda provided to '
+                  '`LambdaResourceRecorder`')
+        elif not self.put_resource_record_lambda.exists:
+            logger.warning('put resource record failed because put_resource_record_lambda '
+                           f'{self.put_resource_record_lambda.construct_arn()} does not exist')
+        elif not resource.exists:
+            logger.warning(f'put resource record failed because resource {resource} does not exist')
+        else:
             payload = toolz.merge(
                 get_resource_meta_description(resource),
                 dict(deployment_id=str(deployment_id).lower(),
@@ -422,8 +430,6 @@ class LambdaResourceRecorder(ResourceRecorder, abc.ABC):
 
             if resp:
                 print(resp)
-        else:
-            print('put resource record failed')
 
     def delete_resource_record(self, manager, resource: AWSResource):
         if self.delete_resource_record and self.delete_resource_record_lambda.exists:
